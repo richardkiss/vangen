@@ -1,0 +1,16 @@
+[project]
+name = "vangen"
+version = "0.1.0"
+authors = [
+    {name = "Richard Kiss", email = "him@richardkiss.com"},
+]
+description = "A Python module for Bitcoin vanity address generation."
+dependencies = ["pycoin"]
+
+[tool.vangen.scripts]
+gen = "vangen.gen:main"
+requires-python = ">=3.8"
+
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
