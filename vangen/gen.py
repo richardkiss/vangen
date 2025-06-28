@@ -1,13 +1,53 @@
-import argparse
-
-# monkey-patch due to bug
 import pycoin.ecdsa.native.openssl
 
 pycoin.ecdsa.native.openssl.load_library = lambda *args: None
 
-from pycoin.encoding.b58 import b2a_hashed_base58
-from pycoin.encoding.hash import hash160
+import hashlib
+import argparse
+
 from pycoin.ecdsa.secp256k1 import secp256k1_generator
+
+BASE58_ALPHABET = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+BASE58_BASE = len(BASE58_ALPHABET)
+BASE58_LOOKUP = dict((c, i) for i, c in enumerate(BASE58_ALPHABET))
+
+
+def b2a_base58(s):
+    """Convert binary to base58 using BASE58_ALPHABET."""
+    num = int.from_bytes(s, "big")
+    encode = bytearray()
+    while num:
+        num, mod = divmod(num, BASE58_BASE)
+        encode.append(BASE58_ALPHABET[mod])
+    encode.reverse()
+    # Add '1' for each leading 0 byte
+    for byte in s:
+        if byte == 0:
+            encode.insert(0, BASE58_ALPHABET[0])
+        else:
+            break
+    return encode.decode("ascii")
+
+
+def double_sha256(data):
+    """Returns the double SHA-256 hash of the input data."""
+    return hashlib.sha256(hashlib.sha256(data).digest()).digest()
+
+
+def b2a_hashed_base58(data):
+    """
+    A "hashed_base58" structure is a base58 integer with four bytes of hash
+    data at the end.
+
+    This function turns data (of type "bytes") into its hashed_base58 equivalent.
+    """
+    return b2a_base58(data + double_sha256(data)[:4])
+
+
+def hash160(public_key_bytes):
+    """Performs SHA-256 followed by RIPEMD-160 on the input bytes."""
+    sha256_digest = hashlib.sha256(public_key_bytes).digest()
+    return hashlib.new("ripemd160", sha256_digest).digest()
 
 
 def parse_arguments() -> argparse.Namespace:
