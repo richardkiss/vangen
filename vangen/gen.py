@@ -5,9 +5,9 @@ import pycoin.ecdsa.native.openssl
 
 pycoin.ecdsa.native.openssl.load_library = lambda *args: None
 
+from pycoin.encoding.b58 import b2a_hashed_base58
 from pycoin.encoding.hash import hash160
 from pycoin.ecdsa.secp256k1 import secp256k1_generator
-from pycoin.networks.registry import network_for_netcode
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -38,7 +38,7 @@ def public_pair_to_bytes(public_pair: tuple, compressed: bool = True) -> bytes:
         )
 
 
-def compute_bitcoin_address(private_key: int, network) -> str:
+def compute_bitcoin_address(private_key: int) -> str:
     """Compute the Bitcoin address from a private key."""
     # Generate the public pair (x, y) from the private key
     public_pair = secp256k1_generator * private_key
@@ -50,7 +50,7 @@ def compute_bitcoin_address(private_key: int, network) -> str:
     h160 = hash160(public_key_bytes)
 
     # Compute the Bitcoin address (P2PKH format)
-    bitcoin_address = network.address.for_p2pkh(h160)
+    bitcoin_address = b2a_hashed_base58(b"\x00" + h160)
 
     return bitcoin_address
 
@@ -61,12 +61,9 @@ def main() -> None:
     initial_key: int = args.initial_key
     count: int = args.count
 
-    # Get the default Bitcoin network
-    network = network_for_netcode("BTC")
-
     # Generate and print addresses for the range
     for i in range(initial_key, initial_key + count):
-        address = compute_bitcoin_address(i, network)
+        address = compute_bitcoin_address(i)
         print(address)
 
 
