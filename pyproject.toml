@@ -5,7 +5,10 @@ authors = [
     {name = "Richard Kiss", email = "him@richardkiss.com"},
 ]
 description = "A Python module for Bitcoin vanity address generation."
-dependencies = ["pycoin"]
+dependencies = [
+    "modular>=25.4.0",
+    "pycoin",
+]
 
 [tool.setuptools.packages.find]
 include = ["vangen*"]
