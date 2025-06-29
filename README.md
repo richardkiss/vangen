@@ -84,6 +84,10 @@ The GPU implementation shows significant speedup over CPU for the hash-intensive
 
 ```bash
 # Run the benchmark
+git clone https://github.com/richardkiss/vangen
+uv venv
+uv sync
+source .venv/bin/activate
 sh build.sh
 python go.py
 ```
