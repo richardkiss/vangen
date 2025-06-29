@@ -316,7 +316,6 @@ fn b2h(input_bytes: Span[Byte]) -> String:
 
 fn sha256_hash_span(bytes_ref: Span[UInt8]) raises -> String:
     """Convenience function to hash a string and return hex representation."""
-    var size = len(bytes_ref)
     var obj = SHA256()
     var h = obj.sha256(bytes_ref)
     return b2h(h)

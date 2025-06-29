@@ -7,6 +7,9 @@ authors = [
 description = "A Python module for Bitcoin vanity address generation."
 dependencies = ["pycoin"]
 
+[tool.setuptools.packages.find]
+include = ["vangen*"]
+
 [tool.vangen.scripts]
 gen = "vangen.gen:main"
 requires-python = ">=3.8"
