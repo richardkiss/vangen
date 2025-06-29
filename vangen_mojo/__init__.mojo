@@ -56,16 +56,16 @@ fn dump_hex(data: Span[UInt8]) -> None:
 
 
 fn matching_hashes_for_range(
-    start: PythonObject, prefix_hex: PythonObject, match_hex: PythonObject
+    start: PythonObject, size: PythonObject, prefix_hex: PythonObject, match_hex: PythonObject
 ) raises -> PythonObject:  # List[UInt64]:
     var s: Int = Int(start)
+    var sz: Int = Int(size)
     var ps = String(prefix_hex)
     var ms = String(match_hex)
     ps_b = b16decode(ps).as_bytes()
     ms_b = b16decode(ms).as_bytes()
-    size = 102400
     r = Python.list()
-    for i in range(size):
+    for i in range(sz):
         idx: Int = s + i
         input_data = input_for_index(idx, ps_b)
         hash_result = hash160_span(input_data)
