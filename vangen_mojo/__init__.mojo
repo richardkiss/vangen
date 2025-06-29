@@ -133,7 +133,8 @@ fn matching_hashes_for_range(
         hash_result = hash160_span(input_data)
         # print(b2h(hash_result))
         if starts_with(hash_result, ms_b):
-            print(b2h(hash_result), end="\r")
+            how_far = Int((i - start) / size * 100)
+            print(b2h(hash_result), "  ", how_far, "% ", i, end="\r")
             r.append(i)
     return r
 
@@ -176,11 +177,11 @@ fn matching_hashes_for_range_gpu(
     prefix = h2b(prefix_string)
     match_bytes = h2b(match_string)
 
-    # Scale thread count based on workload size for better parallelism
-    # A6000 optimized - now that GPU code is optimized, we can use more threads
-    base_thread_count = min(8192, size)  # 8K threads - significantly increased
-    # For very large workloads, use even more threads
-    max_thread_count = min(16384, size)  # Cap at 16K threads
+    # Scale thread count for 100% A6000 utilization (10,752 CUDA cores)
+    # Use all available cores for maximum performance
+    base_thread_count = min(10752, size)  # Full A6000 utilization
+    # For very large workloads, use even more threads to keep GPU busy
+    max_thread_count = min(21504, size)  # 2x cores for better occupancy
     thread_count = min(base_thread_count, max_thread_count)
 
     count_per_thread_unrounded = (size + thread_count - 1) // thread_count
