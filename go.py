@@ -19,7 +19,16 @@ def main():
     start = 10000
     size = 1 << 24
     prefix_hex = "3400000000000010"
-    match_hex = "c49f"
+    match_hex = "5282" #21"
+
+
+    print("Starting matching hashes for range GPU...")
+    r = timeit(
+        lambda: vangen_mojo.matching_hashes_for_range_gpu(
+            start, size, prefix_hex, match_hex
+        )
+    )
+    print(f"r={r}")
 
     print("Starting matching hashes for range...")
     r = timeit(
@@ -28,14 +37,6 @@ def main():
         )
     )
     print(f"r={r}")
-
-    print("Starting matching hashes for range GPU...")
-    r1 = timeit(
-        lambda: vangen_mojo.matching_hashes_for_range_gpu(
-            start, size, prefix_hex, match_hex
-        )
-    )
-    print(f"r1={r1}")
 
 
 if __name__ == "__main__":

@@ -5,6 +5,9 @@ from vangen_mojo.hash import hash160_span, hash160
 
 from memory import Span, UnsafePointer
 
+# Import GPU-optimized functions
+from vangen_mojo.hash_gpu import hash160_span_gpu_optimized, input_for_index_gpu
+
 
 from gpu import thread_idx, block_dim, block_idx
 from gpu.host import DeviceContext, HostBuffer, DeviceBuffer
@@ -21,6 +24,7 @@ fn PyInit_vangen_mojo() -> PythonObject:
         m.def_function[matching_hashes_for_range_gpu](
             "matching_hashes_for_range_gpu"
         )
+        m.def_function[test_hash_consistency_py]("test_hash_consistency")
         return m.finalize()
     except e:
         print("Error initializing module: ", e)
@@ -40,10 +44,18 @@ fn hash160_mojo(b: PythonObject) raises -> PythonObject:
 
 
 fn input_for_index(i: Int, hex_prefix: Span[UInt8]) -> List[UInt8]:
-    r = List[UInt8](capacity=8 + len(hex_prefix))
+    # Pre-allocate with exact size to avoid reallocations
+    var r = List[UInt8](capacity=len(hex_prefix) + 8)
     r.extend(hex_prefix)
-    for idx in range(8):
-        r.append(UInt8((i >> (56 - idx * 8)) & 0xFF))
+    # Unroll the loop for better performance
+    r.append(UInt8((i >> 56) & 0xFF))
+    r.append(UInt8((i >> 48) & 0xFF))
+    r.append(UInt8((i >> 40) & 0xFF))
+    r.append(UInt8((i >> 32) & 0xFF))
+    r.append(UInt8((i >> 24) & 0xFF))
+    r.append(UInt8((i >> 16) & 0xFF))
+    r.append(UInt8((i >> 8) & 0xFF))
+    r.append(UInt8(i & 0xFF))
     return r
 
 
@@ -121,7 +133,7 @@ fn matching_hashes_for_range(
         hash_result = hash160_span(input_data)
         # print(b2h(hash_result))
         if starts_with(hash_result, ms_b):
-            print(b2h(hash_result))
+            print(b2h(hash_result), end="\r")
             r.append(i)
     return r
 
@@ -165,9 +177,11 @@ fn matching_hashes_for_range_gpu(
     match_bytes = h2b(match_string)
 
     # Scale thread count based on workload size for better parallelism
-    base_thread_count = 4096  # Increased from 1024
+    # A6000 optimized - now that GPU code is optimized, we can use more threads
+    base_thread_count = min(8192, size)  # 8K threads - significantly increased
     # For very large workloads, use even more threads
-    thread_count = min(base_thread_count, size)  # Don't exceed work size
+    max_thread_count = min(16384, size)  # Cap at 16K threads
+    thread_count = min(base_thread_count, max_thread_count)
 
     count_per_thread_unrounded = (size + thread_count - 1) // thread_count
     # Reduce rounding to minimize idle threads
@@ -243,16 +257,17 @@ fn launch_gpu_threads(
             length
         ).enqueue_fill(0)
 
-        # Calculate optimal grid and block dimensions for maximum GPU utilization
+        # Calculate optimal grid and block dimensions for A6000 (Ampere architecture)
+        # With optimized GPU code, we can use larger blocks again
         optimal_block_size = (
-            512  # Increased for better occupancy on modern GPUs
+            512  # Increased back up - GPU code is now efficient
         )
         grid_size = (
             thread_count + optimal_block_size - 1
         ) // optimal_block_size
 
         print(
-            "thread_count=",
+            "A6000 optimized: thread_count=",
             thread_count,
             " grid_size=",
             grid_size,
@@ -260,8 +275,14 @@ fn launch_gpu_threads(
             optimal_block_size,
         )
         print("Total GPU threads=", grid_size * optimal_block_size)
+        print(
+            "A6000 utilization=",
+            (grid_size * optimal_block_size / 10752.0 * 100),
+            "%",
+        )
 
-        ctx.enqueue_function[process_gpu_thread](
+        print("Starting GPU kernel...")
+        ctx.enqueue_function[process_gpu_thread_optimized](
             start,
             size,
             count_per_thread,
@@ -272,8 +293,11 @@ fn launch_gpu_threads(
             block_dim=optimal_block_size,
         )
 
+        print("Synchronizing GPU...")
         ctx.synchronize()
+        print("GPU kernel completed")
 
+        print("Transferring results from GPU to CPU...")
         with bit_array_memory.map_to_host() as bit_array_host:
             s = Span(bit_array_host.as_span())
             r = bit_array_to_list(s, start)
@@ -302,7 +326,7 @@ fn process_thread(
             print("Error processing index ", idx, ": ", e)
 
 
-fn process_gpu_thread(
+fn process_gpu_thread_optimized(
     start: Int,
     size: Int,
     count_per_thread: Int,
@@ -314,21 +338,70 @@ fn process_gpu_thread(
     thread_id = Int(block_idx.x) * Int(block_dim.x) + Int(thread_idx.x)
     my_start = thread_id * count_per_thread + start
     my_end = min(my_start + count_per_thread, start + size)
-    print(
-        "thread_id=",
-        thread_id,
-        " block_idx=",
-        block_idx.x,
-        " thread_idx=",
-        thread_idx.x,
-    )
-    print("my_start=", my_start, " my_end=", my_end, " thread_id=", thread_id)
+
+    # Pre-allocate fixed buffers on the stack to reduce allocations
+    var input_buffer = InlineArray[UInt8, 64](
+        0
+    )  # Max reasonable prefix + 8 bytes
+    var hash_buffer = InlineArray[UInt8, 20](
+        0
+    )  # RIPEMD160 output is always 20 bytes
+
+    var prefix_span = Span[UInt8](prefix.data, len(prefix))
+    var match_span = Span[UInt8](match_bytes.data, len(match_bytes))
+
     for offset in range(my_end - my_start):
         idx = my_start + offset
-        input_data = input_for_index(idx, prefix)
-        try:
-            hash_result = hash160_span(input_data)
-            if starts_with(hash_result, match_bytes):
-                set_bit(bit_array, idx - start)
-        except e:
-            print("Error processing index ", idx, ": ", e)
+
+        # Generate input data directly into buffer - no allocation
+        var input_size = input_for_index_gpu(
+            idx, prefix_span, input_buffer.unsafe_ptr()
+        )
+        var input_span = Span[UInt8](input_buffer.unsafe_ptr(), input_size)
+
+        # Compute hash directly into buffer - no exceptions, pure GPU code
+        hash160_span_gpu_optimized(input_span, hash_buffer.unsafe_ptr())
+        var hash_span = Span[UInt8](hash_buffer.unsafe_ptr(), 20)
+
+        # Check match
+        if starts_with(hash_span, match_span):
+            set_bit(bit_array, idx - start)
+
+
+# Test function to verify hash consistency
+fn test_hash_consistency() raises -> Bool:
+    """Test that CPU and GPU hash functions produce identical results."""
+    print("Testing hash consistency between CPU and GPU implementations...")
+
+    # Test data
+    var test_input = List[UInt8]()
+    test_input.extend([0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0])
+
+    # CPU version
+    var cpu_result = hash160_span(test_input)
+
+    # GPU version
+    var gpu_buffer = InlineArray[UInt8, 20](0)
+    hash160_span_gpu_optimized(Span(test_input), gpu_buffer.unsafe_ptr())
+
+    # Compare results
+    for i in range(20):
+        if cpu_result[i] != gpu_buffer[i]:
+            print(
+                "Hash mismatch at byte",
+                i,
+                "CPU:",
+                cpu_result[i],
+                "GPU:",
+                gpu_buffer[i],
+            )
+            return False
+
+    print("Hash consistency test PASSED ✓")
+    return True
+
+
+fn test_hash_consistency_py() raises -> PythonObject:
+    """Python wrapper for hash consistency test."""
+    var result = test_hash_consistency()
+    return PythonObject(result)
