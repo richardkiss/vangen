@@ -168,7 +168,7 @@ struct SHA256:
         u_data = data.unsafe_ptr()
         var b = UInt32(0)
         while b < max_val:
-            var p1 = u_data + b*64
+            var p1 = u_data + b * 64
             var result = self.compress(s0, s1, s2, s3, s4, s5, s6, s7, p1)
             s0 = result[0]
             s1 = result[1]
@@ -314,10 +314,15 @@ fn b2h(input_bytes: Span[Byte]) -> String:
     return result
 
 
+fn sha256_hash_span(bytes_ref: Span[UInt8]) raises -> String:
+    """Convenience function to hash a string and return hex representation."""
+    var size = len(bytes_ref)
+    var obj = SHA256()
+    var h = obj.sha256(bytes_ref)
+    return b2h(h)
+
+
 fn sha256_hash(data_str: String) raises -> String:
     """Convenience function to hash a string and return hex representation."""
-    var bytes_ref = data_str.as_bytes().as_ref()
-    var size = len(data_str)
-    var obj = SHA256()
-    var h = obj.sha256(bytes_ref, size)
-    return b2h(h)
+    var bytes_ref = data_str.as_bytes()
+    return sha256_hash_span(bytes_ref)
