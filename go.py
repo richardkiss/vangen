@@ -30,7 +30,7 @@ def main():
     )
     print(f"r={r}")
 
-    print("Starting matching hashes for range...")
+    print("Starting matching hashes for range on CPU...")
     r, t1 = timeit(
         lambda: vangen_mojo.matching_hashes_for_range(
             start, size, prefix_hex, match_hex
