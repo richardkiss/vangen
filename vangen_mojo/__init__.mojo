@@ -14,7 +14,9 @@ fn PyInit_vangen_mojo() -> PythonObject:
         var m = PythonModuleBuilder("vangen_mojo")
         m.def_function[hash160_mojo]("hash160")
         m.def_function[matching_hashes_for_range]("matching_hashes_for_range")
-        m.def_function[matching_hashes_for_range_gpu]("matching_hashes_for_range_gpu")
+        m.def_function[matching_hashes_for_range_gpu](
+            "matching_hashes_for_range_gpu"
+        )
         return m.finalize()
     except e:
         print("Error initializing module: ", e)
@@ -59,36 +61,38 @@ fn dump_hex(data: Span[UInt8]) -> None:
 
 
 fn matching_hashes_for_range(
-    start: PythonObject, size: PythonObject, prefix_hex: PythonObject, match_hex: PythonObject
-) raises -> PythonObject:  # List[UInt64]:
-    var s: Int = Int(start)
-    var sz: Int = Int(size)
-    var ps = String(prefix_hex)
-    var ms = String(match_hex)
-    ps_b = b16decode(ps).as_bytes()
-    ms_b = b16decode(ms).as_bytes()
+    start_py: PythonObject,
+    size_py: PythonObject,
+    prefix_hex_py: PythonObject,
+    match_hex_py: PythonObject,
+) raises -> PythonObject:
+    var start: Int = Int(start_py)
+    var size: Int = Int(size_py)
+    var prefix_string = String(prefix_hex_py)
+    var match_string = String(match_hex_py)
+    ps_b = b16decode(prefix_string).as_bytes()
+    ms_b = b16decode(match_string).as_bytes()
     r = Python.list()
-    for i in range(sz):
-        idx: Int = s + i
-        input_data = input_for_index(idx, ps_b)
+    for i in range(start, start + size):
+        input_data = input_for_index(i, ps_b)
         hash_result = hash160_span(input_data)
         # dump_hex(hash_result)
         if starts_with(hash_result, ms_b):
-            r.append(idx)
+            r.append(i)
     return r
 
 
 fn set_bit(bit_array: UnsafePointer[UInt8], index: Int) -> None:
     byte_index = index // 8
     bit_index = index % 8
-    bit_array[byte_index] |= (1 << bit_index)
+    bit_array[byte_index] |= 1 << bit_index
 
 
 struct BitArray:
     var bits: List[UInt8]
 
     fn __init__(out self, size: Int):
-        byte_length=(size + 7) // 8
+        byte_length = (size + 7) // 8
         self.bits = List[UInt8](fill=0, length=byte_length)
 
     fn set(mut self, index: Int) -> None:
@@ -121,50 +125,71 @@ alias a_layout = Layout.row_major(1, SIZE)
 alias b_layout = Layout.row_major(SIZE, 1)
 
 
-
-
 fn matching_hashes_for_range_gpu(
-    start: PythonObject, size: PythonObject, prefix_hex: PythonObject, match_hex: PythonObject
+    start_py: PythonObject,
+    size_py: PythonObject,
+    prefix_hex_py: PythonObject,
+    match_hex_py: PythonObject,
 ) raises -> PythonObject:
-    var s: Int = Int(start)
-    var sz: Int = Int(size)
-    var ps = String(prefix_hex)
-    var ms = String(match_hex)
-    ps_b = b16decode(ps).as_bytes()
-    ms_b = b16decode(ms).as_bytes()
+    var start: Int = Int(start_py)
+    var size: Int = Int(size_py)
+    var prefix_string = String(prefix_hex_py)
+    var match_string = String(match_hex_py)
+    prefix = b16decode(prefix_string).as_bytes()
+    match_bytes = b16decode(match_string).as_bytes()
     thread_count = 32
-    size_per_thread_unrounded = (sz + thread_count - 1) // thread_count
-    size_per_thread = (size_per_thread_unrounded + 7) // 8 * 8  # round up to nearest multiple of 8
+    count_per_thread_unrounded = (size + thread_count - 1) // thread_count
+    count_per_thread = (
+        (count_per_thread_unrounded + 7) // 8 * 8
+    )  # round up to nearest multiple of 8
 
-    print("size_per_thread_unrounded=", size_per_thread_unrounded, " size_per_thread=", size_per_thread)
+    print(
+        "count_per_thread_unrounded=",
+        count_per_thread_unrounded,
+        " count_per_thread=",
+        count_per_thread,
+    )
 
-    bit_array = BitArray(sz)
+    bit_array = BitArray(size)
     ptr = bit_array.bits.unsafe_ptr()
 
     for thread_id in range(thread_count):
-        start0 = thread_id * size_per_thread
-        end0 = min(start0 + size_per_thread, sz)
-        process_thread(start0, end0, thread_id, ps_b, ms_b, ptr, s)
+        process_thread(
+            start,
+            size,
+            count_per_thread,
+            List(prefix),
+            List(match_bytes),
+            ptr,
+            thread_id,
+        )
 
     # convert bit array to a list of indices
     r = Python.list()
-    for i in range(sz):
+    for i in range(size):
         if bit_array.get(i):
-            r.append(s + i)
+            r.append(start + i)
     return r
 
-fn process_thread(start: Int, end: Int, thread_id: Int, ps_b: Span[UInt8], ms_b: Span[UInt8], bit_array: UnsafePointer[UInt8], s: Int) -> None:
-    for i in range(start, end):
-        idx: Int = s + i  # Convert relative index to absolute index
-        input_data = input_for_index(idx, ps_b)
+
+fn process_thread(
+    start: Int,
+    size: Int,
+    count_per_thread: Int,
+    prefix: List[UInt8],
+    match_bytes: List[UInt8],
+    bit_array: UnsafePointer[UInt8],
+    thread_id: Int,
+) -> None:
+    my_start = thread_id * count_per_thread + start
+    my_end = min(my_start + count_per_thread, start + size)
+    for offset in range(my_end-my_start):
+        idx = my_start + offset
+        input_data = input_for_index(idx, prefix)
         try:
             hash_result = hash160_span(input_data)
-            if starts_with(hash_result, ms_b):
+            if starts_with(hash_result, match_bytes):
                 print("matching index=", idx)
-                set_bit(bit_array, i)  # Set bit at relative position i
-
-                # Here we would set the bit in a shared bit array or similar structure
-                # This is a placeholder for the actual GPU logic
-                pass
+                set_bit(bit_array, idx - start)
         except e:
             print("Error processing index ", idx, ": ", e)
