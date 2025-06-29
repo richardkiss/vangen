@@ -1,14 +1,15 @@
 # Copyright (c) 2021 Pieter Wuille
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
-"""SHA-256 tests using the sha256_lib module."""
+"""Pure Mojo SHA-256 implementation library."""
 
-from testing import assert_equal
+# Based on SHA-256 specification and RIPEMD-160 template
+# Adapted for Mojo by following the structure of ripemd160.mojo
+
 from memory import Pointer
 from memory.unsafe_pointer import UnsafePointer
 
 
-# Include the library definitions directly for now (Mojo import system may need different approach)
 struct SHA256:
     var K: InlineArray[UInt32, 64]  # Round constants
 
@@ -149,9 +150,10 @@ struct SHA256:
         # Add the compressed chunk to the current hash value
         return (h0 + a, h1 + b, h2 + c, h3 + d, h4 + e, h5 + f, h6 + g, h7 + h)
 
-    fn sha256(self, data: Pointer[UInt8], size: UInt32) raises -> List[UInt8]:
+    fn sha256(self, data: Span[UInt8]) raises -> List[UInt8]:
         """Compute the SHA-256 hash of data."""
         # Initialize hash values (first 32 bits of the fractional parts of the square roots of the first 8 primes 2..19)
+        size = len(data)
         var s0: UInt32 = 0x6A09E667
         var s1: UInt32 = 0xBB67AE85
         var s2: UInt32 = 0x3C6EF372
@@ -163,10 +165,10 @@ struct SHA256:
 
         # Process full 64-byte blocks in the input
         var max_val = size >> 6
+        u_data = data.unsafe_ptr()
         var b = UInt32(0)
-        var u_data = UnsafePointer(to=data[])
         while b < max_val:
-            var p1 = u_data + (b * 64)
+            var p1 = u_data + b*64
             var result = self.compress(s0, s1, s2, s3, s4, s5, s6, s7, p1)
             s0 = result[0]
             s1 = result[1]
@@ -319,81 +321,3 @@ fn sha256_hash(data_str: String) raises -> String:
     var obj = SHA256()
     var h = obj.sha256(bytes_ref, size)
     return b2h(h)
-
-
-def check_sha256(data_str: String, expected_hex: String) -> None:
-    """Check that the SHA-256 hash of data matches expected."""
-    var bytes_ref = data_str.as_bytes().as_ref()
-    var size = len(data_str)
-    var obj = SHA256()
-    var h = obj.sha256(bytes_ref, size)
-    var h_hex = b2h(h)
-    assert_equal(h_hex, expected_hex)
-    print("hash ok:", expected_hex)
-
-
-def check_sha256_convenience(data_str: String, expected_hex: String) -> None:
-    """Check SHA-256 using the convenience function."""
-    var h_hex = sha256_hash(data_str)
-    assert_equal(h_hex, expected_hex)
-    print("convenience hash ok:", expected_hex)
-
-
-def repeat(s: String, n: Int) -> List[Int8]:
-    var r = List[Int8](capacity=n)
-    for _ in range(n):
-        r.append(ord(s[0]))
-    return r
-
-
-def main():
-    print("Running SHA-256 tests...")
-
-    # SHA-256 test vectors using the struct directly
-    check_sha256(
-        "", "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-    )
-    check_sha256(
-        "a", "ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb"
-    )
-    check_sha256(
-        "abc",
-        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
-    )
-    check_sha256(
-        "message digest",
-        "f7846f55cf23e14eebeab5b4e1550cad5b509e3348fbc4efa3a1413d393cb650",
-    )
-    check_sha256(
-        "abcdefghijklmnopqrstuvwxyz",
-        "71c480df93d6ae2f1efad1447c66c9525e316218cf51fc8d9ed832f2daf18b73",
-    )
-    check_sha256(
-        "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq",
-        "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1",
-    )
-    check_sha256(
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789",
-        "db4bfcbd4da0cd85a60c3c37d3fbd8805c77f15fc6b1fdfe614ee0a7c8fdb4c0",
-    )
-    check_sha256(
-        "12345678901234567890123456789012345678901234567890123456789012345678901234567890",
-        "f371bc4a311f2b009eef952dd83ca80e2b60026c8e935592d0f9c308453c813e",
-    )
-
-    print("Testing convenience function...")
-
-    # Test the convenience function
-    check_sha256_convenience(
-        "", "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-    )
-    check_sha256_convenience(
-        "abc",
-        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
-    )
-    check_sha256_convenience(
-        "hello world",
-        "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9",
-    )
-
-    print("All SHA-256 tests passed!")

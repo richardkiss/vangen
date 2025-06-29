@@ -2,10 +2,18 @@ import pycoin.ecdsa.native.openssl
 
 pycoin.ecdsa.native.openssl.load_library = lambda *args: None
 
-import hashlib
 import argparse
+import hashlib
+import sys
 
 from pycoin.ecdsa.secp256k1 import secp256k1_generator
+
+import max.mojo.importer
+
+sys.path.insert(0, "")
+
+from vangen_mojo import hash160
+
 
 BASE58_ALPHABET = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 BASE58_BASE = len(BASE58_ALPHABET)
@@ -42,12 +50,6 @@ def b2a_hashed_base58(data):
     This function turns data (of type "bytes") into its hashed_base58 equivalent.
     """
     return b2a_base58(data + double_sha256(data)[:4])
-
-
-def hash160(public_key_bytes):
-    """Performs SHA-256 followed by RIPEMD-160 on the input bytes."""
-    sha256_digest = hashlib.sha256(public_key_bytes).digest()
-    return hashlib.new("ripemd160", sha256_digest).digest()
 
 
 def parse_arguments() -> argparse.Namespace:
